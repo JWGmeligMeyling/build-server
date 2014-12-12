@@ -17,7 +17,6 @@ import com.google.common.util.concurrent.MoreExecutors;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import nl.tudelft.ewi.build.Config;
-import nl.tudelft.ewi.build.docker.DockerManager;
 import nl.tudelft.ewi.build.jaxrs.models.BuildRequest;
 
 @Slf4j
@@ -29,17 +28,17 @@ public class BuildManager {
 
 	private final ListeningExecutorService listeningService;
 	private final ScheduledExecutorService schedulerService;
-	private final DockerManager dockerManager;
+	private final BuildRunner.BuildRunnerFactory buildRunnerFactory;
 	private final Config config;
 
 	@Inject
-	public BuildManager(DockerManager dockerManager, Config config) {
+	public BuildManager(Config config, BuildRunner.BuildRunnerFactory buildRunnerFactory) {
 		this.futures = Maps.newConcurrentMap();
 		this.runners = Maps.newConcurrentMap();
 
 		this.schedulerService = Executors.newScheduledThreadPool(config.getMaximumConcurrentJobs());
 		this.listeningService = MoreExecutors.listeningDecorator(schedulerService);
-		this.dockerManager = dockerManager;
+		this.buildRunnerFactory = buildRunnerFactory;
 		this.config = config;
 	}
 
@@ -51,7 +50,7 @@ public class BuildManager {
 		}
 
 		UUID buildId = UUID.randomUUID();
-		BuildRunner runner = new BuildRunner(dockerManager, config, request, buildId);
+		BuildRunner runner = buildRunnerFactory.create(request, buildId);
 		ListenableFuture<?> future = listeningService.submit(runner);
 		futures.put(buildId, future);
 		runners.put(buildId, runner);

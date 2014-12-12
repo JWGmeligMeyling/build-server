@@ -1,7 +1,11 @@
 package nl.tudelft.ewi.build.docker;
 
+import java.io.IOException;
+
 import com.google.common.base.Joiner;
+
 import nl.tudelft.ewi.build.SimpleConfig;
+
 import org.junit.Assert;
 import org.junit.Assume;
 import org.junit.Before;
@@ -21,12 +25,12 @@ public class DockerManagerImplTest {
 	}
 	
 	@Test
-	public void testActiveJobsReturnsZeroWhenNoJobsScheduled() {
+	public void testActiveJobsReturnsZeroWhenNoJobsScheduled() throws IOException {
 		Assert.assertEquals(0, manager.getActiveJobs());
 	}
 	
 	@Test
-	public void testStartingContainer() {
+	public void testStartingContainer() throws IOException {
 		DefaultLogger logger = new DefaultLogger();
 		DockerJob job = new DockerJob();
 		job.setCommand("whoami");
@@ -39,7 +43,7 @@ public class DockerManagerImplTest {
 	}
 	
 	@Test
-	public void testTerminatingRunningContainer() throws InterruptedException {
+	public void testTerminatingRunningContainer() throws InterruptedException, IOException {
 		DefaultLogger logger = new DefaultLogger();
 		DockerJob job = new DockerJob();
 		job.setCommand("sleep 100");

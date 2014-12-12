@@ -13,6 +13,10 @@ import java.util.UUID;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
+import com.google.inject.Provider;
+import com.google.inject.assistedinject.Assisted;
+import com.google.inject.assistedinject.AssistedInject;
+
 import lombok.Data;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -32,18 +36,45 @@ import nl.tudelft.ewi.build.jaxrs.models.BuildInstruction;
 import nl.tudelft.ewi.build.jaxrs.models.BuildRequest;
 import nl.tudelft.ewi.build.jaxrs.models.BuildResult;
 import nl.tudelft.ewi.build.jaxrs.models.Source;
+
+import org.eclipse.jgit.util.FileUtils;
 import org.jboss.resteasy.util.Base64;
 
 @Data
 @Slf4j
-class BuildRunner implements Runnable {
+public class BuildRunner implements Runnable {
 
 	private final DockerManager docker;
 	private final Config config;
 	private final BuildRequest request;
 	private final UUID identifier;
+	private final Provider<BuildInstructionInterpreterRegistry> buildInstructionInterpreterRegistryProvider;
+	private final Provider<StagingDirectoryPreparerRegistry> stagingDirectoryPreparerRegistryProvider;
 	
 	private final DefaultLogger logger = new DefaultLogger();
+
+	@AssistedInject
+	public BuildRunner(
+			final DockerManager docker,
+			final Config config,
+			@Assisted final BuildRequest request,
+			@Assisted final UUID identifier,
+			final Provider<BuildInstructionInterpreterRegistry> buildInstructionInterpreterRegistryProvider,
+			final Provider<StagingDirectoryPreparerRegistry> stagingDirectoryPreparerRegistryProvider) {
+		
+		this.docker = docker;
+		this.config = config;
+		this.request = request;
+		this.identifier = identifier;
+		this.buildInstructionInterpreterRegistryProvider = buildInstructionInterpreterRegistryProvider;
+		this.stagingDirectoryPreparerRegistryProvider = stagingDirectoryPreparerRegistryProvider;
+	}
+	
+	public static interface BuildRunnerFactory {
+		
+		BuildRunner create(BuildRequest request, UUID identifier);
+		
+	}
 
 	@Override
 	public void run() {
@@ -66,7 +97,7 @@ class BuildRunner implements Runnable {
 		}
 	}
 
-	public void terminate() {
+	public void terminate() throws IOException {
 		Identifiable identifiable = logger.getContainer();
 		if (identifiable != null) {
 			log.warn("Issueing container termination to docker: {}", identifiable);
@@ -78,7 +109,7 @@ class BuildRunner implements Runnable {
 		File stagingDirectory = new File(config.getStagingDirectory(), identifier.toString());
 		try {
 			log.info("Created staging directory: {}", stagingDirectory.getAbsolutePath());
-			stagingDirectory.mkdirs();
+			FileUtils.mkdirs(stagingDirectory);
 			return stagingDirectory;
 		}
 		catch (Throwable e) {
@@ -124,14 +155,14 @@ class BuildRunner implements Runnable {
 	@SuppressWarnings("unchecked")
 	private BuildInstructionInterpreter<BuildInstruction> createBuildDecorator() {
 		BuildInstruction instruction = request.getInstruction();
-		BuildInstructionInterpreterRegistry registry = new BuildInstructionInterpreterRegistry();
+		BuildInstructionInterpreterRegistry registry = buildInstructionInterpreterRegistryProvider.get();
 		return (BuildInstructionInterpreter<BuildInstruction>) registry.getBuildDecorator(instruction.getClass());
 	}
 
 	@SuppressWarnings("unchecked")
 	private StagingDirectoryPreparer<Source> createStagingDirectoryPreparer() {
 		Source source = request.getSource();
-		StagingDirectoryPreparerRegistry registry = new StagingDirectoryPreparerRegistry();
+		StagingDirectoryPreparerRegistry registry = stagingDirectoryPreparerRegistryProvider.get();
 		return (StagingDirectoryPreparer<Source>) registry.getStagingDirectoryPreparer(source.getClass());
 	}
 

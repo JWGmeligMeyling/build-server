@@ -12,6 +12,7 @@ import nl.tudelft.ewi.build.docker.DockerManager;
 import nl.tudelft.ewi.build.jaxrs.models.BuildRequest;
 import nl.tudelft.ewi.build.jaxrs.models.GitSource;
 import nl.tudelft.ewi.build.jaxrs.models.MavenBuildInstruction;
+
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -35,7 +36,7 @@ public class BuildManagerTest {
 		when(config.getWorkingDirectory()).thenReturn("/workspace");
 		
 		dockerManager = new MockedDockerManager(CONCURRENT_JOBS, JOB_DURATION);
-		manager = new BuildManager(dockerManager, config);
+		manager = new BuildManager(config, new MockedBuildRunnerFactory(dockerManager, config));
 	}
 
 	@Test

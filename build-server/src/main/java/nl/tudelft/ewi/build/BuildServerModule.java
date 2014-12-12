@@ -7,10 +7,14 @@ import java.lang.annotation.Annotation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.inject.AbstractModule;
+import com.google.inject.assistedinject.FactoryModuleBuilder;
+
 import lombok.extern.slf4j.Slf4j;
+import nl.tudelft.ewi.build.builds.BuildRunner;
 import nl.tudelft.ewi.build.docker.DockerManager;
 import nl.tudelft.ewi.build.docker.DockerManagerImpl;
 import nl.tudelft.ewi.build.jaxrs.json.MappingModule;
+
 import org.jboss.resteasy.plugins.guice.ext.JaxrsModule;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 import org.reflections.Reflections;
@@ -38,8 +42,9 @@ public class BuildServerModule extends AbstractModule {
 				return mapper;
 			}
 		});
-		
+
 		bind(DockerManager.class).to(DockerManagerImpl.class);
+		install(new FactoryModuleBuilder().build(BuildRunner.BuildRunnerFactory.class));
 		
 		findResourcesWith(Path.class);
 		findResourcesWith(Provider.class);

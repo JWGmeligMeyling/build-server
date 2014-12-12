@@ -20,21 +20,24 @@ public interface DockerManager {
 	 *            sort of job to run inside the container.
 	 * @return A {@link BuildReference} which allows the requester to terminate
 	 *         the container or retrieve information about the container.
+	 * @throws IOException 
 	 */
-	BuildReference run(Logger logger, DockerJob job);
+	BuildReference run(Logger logger, DockerJob job) throws IOException;
 
 	/**
 	 * Terminates a running Docker container.
 	 * 
 	 * @param container
 	 *            The id of the container to terminate.
+	 * @throws IOException 
 	 */
-	void terminate(Identifiable container);
+	void terminate(Identifiable container) throws IOException;
 
 	/**
 	 * @return The number of currently running containers according to the
 	 *         Docker service.
+	 * @throws IOException 
 	 */
-	int getActiveJobs();
+	int getActiveJobs() throws IOException;
 
 }
