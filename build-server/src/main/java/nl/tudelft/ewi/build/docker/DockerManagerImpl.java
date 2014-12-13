@@ -1,90 +1,164 @@
 package nl.tudelft.ewi.build.docker;
 
 import javax.inject.Inject;
-import javax.ws.rs.ClientErrorException;
-import javax.ws.rs.InternalServerErrorException;
-import javax.ws.rs.NotFoundException;
-import javax.ws.rs.client.Client;
-import javax.ws.rs.client.ClientBuilder;
-import javax.ws.rs.client.Entity;
-import javax.ws.rs.core.GenericType;
-import javax.ws.rs.core.MediaType;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.URI;
 import java.net.URLEncoder;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import com.google.common.io.Files;
+import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
+import com.spotify.docker.client.DefaultDockerClient;
+import com.spotify.docker.client.DockerCertificateException;
+import com.spotify.docker.client.DockerCertificates;
+import com.spotify.docker.client.DockerClient;
+import com.spotify.docker.client.DockerClient.AttachParameter;
+import com.spotify.docker.client.DockerException;
+import com.spotify.docker.client.ProgressHandler;
+import com.spotify.docker.client.DockerClient.BuildParameter;
+import com.spotify.docker.client.messages.ContainerConfig;
+import com.spotify.docker.client.messages.ContainerCreation;
+import com.spotify.docker.client.messages.ContainerExit;
+import com.spotify.docker.client.messages.ProgressMessage;
+
 import lombok.extern.slf4j.Slf4j;
 import nl.tudelft.ewi.build.Config;
-import org.xeustechnologies.jtar.TarEntry;
-import org.xeustechnologies.jtar.TarOutputStream;
 
 @Slf4j
 public class DockerManagerImpl implements DockerManager {
 
 	private final ListeningExecutorService executor;
-	private final Config config;
+	private final DockerClient client;
 
 	@Inject
-	public DockerManagerImpl(Config config) {
+	public DockerManagerImpl(final Config config) throws DockerCertificateException {
 		int poolSize = config.getMaximumConcurrentJobs() * 2;
 		this.executor = MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(poolSize));
-		this.config = config;
+		
+		log.info("Setting up Docker client for address {}", config.getDockerHost());
+		this.client = DefaultDockerClient
+			.builder()
+			.uri(URI.create(config.getDockerHost()))
+			.dockerCertificates(new DockerCertificates(config.getCertificateDirectory().toPath()))
+			.build();
+				
 	}
 	
 	@Override
-	public BuildReference run(final Logger logger, final DockerJob job) {
-		final String host = config.getDockerHost();
-		final Identifiable containerId = create(host, job);
-
-		final Future<?> future = executor.submit(new Runnable() {
+	public BuildReference run(final Logger logger, final DockerJob job) throws DockerException, InterruptedException {
+		Set<String> mounts = Sets.newHashSet();
+		if (job.getMounts() != null) {
+			for (Entry<String, String> mount : job.getMounts()
+				.entrySet()) {
+				mounts.add(mount.getKey() + "/:" + mount.getValue());// + ":rw");
+			}
+		}
+		
+		ContainerConfig containerConfig = ContainerConfig.builder()
+			.tty(true)
+			.cmd("ls", "-la")//CommandParser.parse(job.getCommand())
+			.workingDir(job.getWorkingDirectory())
+			.volumes(mounts)
+			.image(job.getImage())
+			.build();
+				
+		log.debug("Creating container: {}", containerConfig);
+		ContainerCreation creation = client.createContainer(containerConfig);
+			
+		final String containerId = creation.id();
+		final Identifiable identifiable = new Identifiable();
+		identifiable.setId(containerId);
+		
+		final ListenableFuture<?> future = executor.submit(new Runnable() {
+			
 			@Override
 			public void run() {
-				start(host, containerId, job);
+				try {
+					work();
+				}
+				catch (Throwable e) {
+					log.error(e.getMessage(), e);
+				}
+			}
+			
+			private void work() throws DockerException, InterruptedException {
+				
+				log.debug("Starting container: {}", containerId);
 				logger.onStart();
+				client.startContainer(containerId);
+				
+				log.debug("Fetching logs for container {}", containerId);
+				try (InputStream in = client.attachContainer(containerId,
+						AttachParameter.LOGS, AttachParameter.STDIN,
+						AttachParameter.STDOUT, AttachParameter.STREAM);
+						
+					InputStreamReader reader = new InputStreamReader(in)) {
 
-				Future<?> logFuture = fetchLog(host, containerId, logger);
-				StatusCode code = awaitTermination(host, containerId);
-				logFuture.cancel(true);
+					boolean finished = false;
+					StringBuilder builder = new StringBuilder();
+					while (!finished) {
+						int i = reader.read();
+						if (i == -1) {
+							logger.onNextLine(builder.toString());
+							break;
+						}
 
-				stopAndDelete(host, containerId);
-				logger.onClose(code.getStatusCode());
+						char c = (char) i;
+						if (c == '\n' || finished) {
+							logger.onNextLine(builder.toString());
+							builder.delete(0, builder.length() + 1);
+						}
+						else if (c != '\r') {
+							builder.append(c);
+						}
+					}
+				}
+				catch (IOException e) {
+					log.warn(e.getMessage(), e);
+				}
+
+				log.debug("Waiting for container {} to terminate", containerId);
+				ContainerExit exit = client.waitContainer(containerId);
+				
+				logger.onClose(exit.statusCode());
+				delete(identifiable);
 			}
 		});
 		
-		return new BuildReference(job, containerId, new Future<Object>() {
+		return new BuildReference(job, identifiable, new Future<Object>() {
 			@Override
 			public boolean cancel(boolean mayInterruptIfRunning) {
 				if (future.cancel(mayInterruptIfRunning)) {
 					log.warn("Terminating container: {} because it was cancelled.", containerId);
-					stopAndDelete(host, containerId);
-					log.warn("Container: {} was terminated forcefully.", containerId);
-					return true;
+					try {
+						stopAndDelete(identifiable);
+						log.warn("Container: {} was terminated forcefully.", containerId);
+						return true;
+					}
+					catch (InterruptedException | DockerException e) {
+						log.warn("Failed to terminate", e);
+					}
 				}
 				return false;
 			}
@@ -112,13 +186,12 @@ public class DockerManagerImpl implements DockerManager {
 	}
 	
 	@Override
-	public void terminate(Identifiable container) {
-		String host = config.getDockerHost();
-		stopAndDelete(host, container);
+	public void terminate(final Identifiable container) throws DockerException, InterruptedException {
+		stopAndDelete(container);
 	}
 
 	@Override
-	public int getActiveJobs() {
+	public int getActiveJobs() throws DockerException, InterruptedException {
 		int counter = 0;
 		for (Container container : getContainers().values()) {
 			if (!Strings.emptyToNull(container.getStatus()).startsWith("Exit ")) {
@@ -129,14 +202,16 @@ public class DockerManagerImpl implements DockerManager {
 	}
 
 	@Override
-	public void buildImage(String name, String dockerFileContents, ImageBuildObserver observer) throws IOException {
+	public void buildImage(String name, final String dockerFileContents,
+			final ImageBuildObserver observer) throws IOException,
+			DockerException, InterruptedException {
+		
 		Preconditions.checkArgument(!Strings.isNullOrEmpty(name));
 		Preconditions.checkArgument(!Strings.isNullOrEmpty(dockerFileContents));
 		
 		name = URLEncoder.encode(name, "UTF-8");
 		
 		File tempDir = Files.createTempDir();
-		File archive = new File(tempDir, "image.tar");
 		File dockerFile = new File(tempDir, "Dockerfile");
 		
 		FileWriter writer = new FileWriter(dockerFile);
@@ -144,303 +219,99 @@ public class DockerManagerImpl implements DockerManager {
 		writer.flush();
 		writer.close();
 		
-		try (TarOutputStream out = new TarOutputStream(new BufferedOutputStream(new FileOutputStream(archive)))) {
-			out.putNextEntry(new TarEntry(dockerFile, dockerFile.getName()));
+		String id = client.build(tempDir.toPath(), name, new ProgressHandler() {
 			
-			int count;
-			byte data[] = new byte[2048];
-			try (BufferedInputStream origin = new BufferedInputStream(new FileInputStream(dockerFile))) {
-				while((count = origin.read(data)) != -1) {
-					out.write(data, 0, count);
-				}
-			}
-			out.flush();
-		}
-
-		Client client = null;
-		try {
-			client = ClientBuilder.newClient();
-			log.debug("Requesting image to be built...");
-			InputStream output = client.target(config.getDockerHost() + "/build?t=" + name + "&nocache=true&forcerm=true")
-				.request("application/tar")
-				.post(Entity.entity(archive, "application/tar"), InputStream.class);
-			
-			ObjectMapper mapper = new ObjectMapper();
-			try (BufferedReader reader = new BufferedReader(new InputStreamReader(output))) {
-				String line;
-				while ((line = reader.readLine()) != null) {
-					if (line.startsWith("{\"stream\":")) {
-						observer.onMessage(mapper.readValue(line, Stream.class).getStream());
-					}
-					else if (line.startsWith("{\"error\":")) {
-						observer.onError(mapper.readValue(line, Error.class).getErrorDetail().getMessage());
-					}
-				}
-			}
-		}
-		finally {
-			observer.onCompleted();
-			if (client != null) {
-				client.close();
-			}
-			
-			archive.delete();
-			dockerFile.delete();
-			tempDir.delete();
-		}
-	}
-	
-	private Map<Identifiable, Container> getContainers() {
-		Client client = null;
-		try {
-			client = ClientBuilder.newClient();
-			log.debug("Listing containers...");
-			List<Container> containers = client.target(config.getDockerHost() + "/containers/json")
-				.request(MediaType.APPLICATION_JSON)
-				.get(new GenericType<List<Container>>() { });
-			
-			Map<Identifiable, Container> mapping = Maps.newLinkedHashMap();
-			for (Container container : containers) {
-				Identifiable identifiable = new Identifiable();
-				identifiable.setId(container.getId());
-				mapping.put(identifiable, container);
-			}
-			return mapping;
-		}
-		finally {
-			if (client != null) {
-				client.close();
-			}
-		}
-	}
-
-	private Identifiable create(final String host, DockerJob job) {
-		Map<String, Object> volumes = Maps.newHashMap();
-		if (job.getMounts() != null) {
-			for (String mount : job.getMounts()
-				.values()) {
-				volumes.put(mount, ImmutableMap.<String, Object> of());
-			}
-		}
-
-		Container container = new Container().setTty(true)
-			.setCmd(CommandParser.parse(job.getCommand()))
-			.setWorkingDir(job.getWorkingDirectory())
-			.setVolumes(volumes)
-			.setImage(job.getImage());
-
-		Client client = null;
-		try {
-			client = ClientBuilder.newClient();
-			log.debug("Creating container: {}", container);
-			return client.target(host + "/containers/create")
-				.request(MediaType.APPLICATION_JSON)
-				.post(Entity.json(container), Identifiable.class);
-		}
-		finally {
-			if (client != null) {
-				client.close();
-			}
-		}
-	}
-
-	private void start(final String host, final Identifiable container, final DockerJob job) {
-		Client client = null;
-		try {
-			client = ClientBuilder.newClient();
-			List<String> mounts = Lists.newArrayList();
-			if (job.getMounts() != null) {
-				for (Entry<String, String> mount : job.getMounts()
-					.entrySet()) {
-					mounts.add(mount.getKey() + ":" + mount.getValue() + ":rw");
-				}
-			}
-
-			ContainerStart start = new ContainerStart().setBinds(mounts)
-				.setLxcConf(Lists.newArrayList(new LxcConf("lxc.utsname", "docker")));
-
-			log.debug("Starting container: {} -> {}", container.getId(), start);
-			client.target(host + "/containers/" + container.getId() + "/start")
-				.request(MediaType.APPLICATION_JSON)
-				.accept(MediaType.TEXT_PLAIN)
-				.post(Entity.json(start));
-		}
-		finally {
-			if (client != null) {
-				client.close();
-			}
-		}
-	}
-
-	private Future<?> fetchLog(final String host, final Identifiable container, final Logger collector) {
-		return executor.submit(new Runnable() {
 			@Override
-			public void run() {
-				Client client = null;
-				try {
-					client = ClientBuilder.newClient();
-					log.debug("Streaming log from container: {}", container.getId());
-
-					String url = "/containers/" + container.getId() + "/attach?logs=1&stream=1&stdout=1&stderr=1";
-					final InputStream logs = client.target(host + url)
-						.request()
-						.accept(MediaType.APPLICATION_OCTET_STREAM_TYPE)
-						.post(null, InputStream.class);
-
-					try (InputStreamReader reader = new InputStreamReader(logs)) {
-						boolean finished = false;
-						StringBuilder builder = new StringBuilder();
-						while (!finished) {
-							int i = reader.read();
-							if (i == -1) {
-								collector.onNextLine(builder.toString());
-								break;
-							}
-
-							char c = (char) i;
-							if (c == '\n' || finished) {
-								collector.onNextLine(builder.toString());
-								builder.delete(0, builder.length() + 1);
-							}
-							else if (c != '\r') {
-								builder.append(c);
-							}
-						}
-					}
-					catch (IOException e) {
-						log.error(e.getMessage(), e);
-					}
+			public void progress(ProgressMessage message) throws DockerException {
+				String stream, error;
+				if((stream = message.stream()) != null) {
+					observer.onMessage(stream);
 				}
-				finally {
-					if (client != null) {
-						client.close();
-					}
+				if((error = message.error()) != null) {
+					observer.onError(error);
 				}
 			}
-		});
-	}
-
-	private StatusCode awaitTermination(String host, Identifiable container) {
-		log.debug("Awaiting termination of container: {}", container.getId());
-
-		StatusCode status;
-		while (true) {
-			status = getStatus(host, container);
-			Integer statusCode = status.getStatusCode();
-			if (statusCode != null) {
-				break;
-			}
-
-			try {
-				Thread.sleep(1000);
-			}
-			catch (InterruptedException e) {
-				log.error(e.getMessage(), e);
-			}
-		}
-
-		log.debug("Container: {} terminated with status: {}", container.getId(), status);
-		return status;
+			
+		}, BuildParameter.FORCE_RM, BuildParameter.NO_CACHE);
+		
+		Identifiable identifiable = new Identifiable();
+		identifiable.setId(id);
+		observer.onCompleted();
+		dockerFile.delete();
+		tempDir.delete();
 	}
 	
-	private boolean isStopped(String host, Identifiable identifiable) {
+	private Map<Identifiable, Container> getContainers() throws DockerException, InterruptedException {
+		log.debug("Listing containers...");
+		
+		List<Container> containers = Lists.transform(client.listContainers(), new Function<com.spotify.docker.client.messages.Container, Container>() {
+
+			@Override
+			public Container apply(com.spotify.docker.client.messages.Container input) {
+				return new Container()
+					.setId(input.id())
+					.setCmd(Lists.newArrayList(input.command().split("\n")))
+					.setStatus(input.status());
+			}
+			
+		});
+		
+		Map<Identifiable, Container> mapping = Maps.newLinkedHashMap();
+		for (Container container : containers) {
+			Identifiable identifiable = new Identifiable();
+			identifiable.setId(container.getId());
+			mapping.put(identifiable, container);
+		}
+		return mapping;
+	}
+
+	private boolean isStopped(final Identifiable identifiable) {
 		try {
 			Map<Identifiable, Container> containers = getContainers();
 			if (containers.containsKey(identifiable)) {
 				Container container = containers.get(identifiable);
 				return Strings.nullToEmpty(container.getStatus()).startsWith("Exit ");
 			}
-			return true;
 		}
-		catch (InternalServerErrorException | NotFoundException e) {
+		catch (DockerException | InterruptedException e) {
 			log.warn(e.getMessage(), e);
-			return true;
 		}
+		return true;
 	}
 
-	private StatusCode getStatus(final String host, final Identifiable container) {
-		Client client = null;
-		try {
-			client = ClientBuilder.newClient();
-			log.debug("Retrieving status of container: {}", container.getId());
-			return client.target(host + "/containers/" + container.getId() + "/wait")
-				.request()
-				.accept(MediaType.APPLICATION_JSON)
-				.post(null, StatusCode.class);
-		}
-		finally {
-			if (client != null) {
-				client.close();
-			}
-		}
-	}
-	
-	private boolean exists(String host, Identifiable container) {
+	private boolean exists(final Identifiable container) {
 		try {
 			return getContainers().containsKey(container);
 		}
-		catch (InternalServerErrorException | NotFoundException e) {
+		catch (DockerException | InterruptedException e) {
 			return false;
 		}
 	}
 	
-	private void stopAndDelete(String host, Identifiable container) {
-		try {
-			log.debug("Attempting to stop container: {}", container);
-			do {
-				stop(host, container);
-				waitFor(1000);
-			}
-			while (!isStopped(host, container));
+	private void stopAndDelete(final Identifiable container) throws DockerException, InterruptedException {
+		log.debug("Attempting to stop container: {}", container);
+		do {
+			stop(container);
+			waitFor(1000);
 		}
-		catch (ClientErrorException e) {
-			log.warn(e.getMessage(), e);
-		}
+		while (!isStopped(container));
 
-		try {
-			log.debug("Attempting to delete container: {}", container);
-			do {
-				delete(host, container);
-				waitFor(1000);
-			}
-			while (exists(host, container));
+		log.debug("Attempting to delete container: {}", container);
+		do {
+			delete(container);
+			waitFor(1000);
 		}
-		catch (ClientErrorException e) {
-			log.warn(e.getMessage(), e);
-		}
+		while (exists(container));
 	}
 
-	private void stop(final String host, final Identifiable container) {
-		Client client = null;
-		try {
-			client = ClientBuilder.newClient();
-			log.debug("Stopping container: {}", container.getId());
-			client.target(host + "/containers/" + container.getId() + "/stop?t=5")
-				.request(MediaType.APPLICATION_JSON)
-				.accept(MediaType.TEXT_PLAIN)
-				.post(null);
-		}
-		finally {
-			if (client != null) {
-				client.close();
-			}
-		}
+	private void stop(final Identifiable container) throws DockerException, InterruptedException {
+		log.debug("Stopping container: {}", container.getId());
+		client.stopContainer(container.getId(), 5);
 	}
 
-	private void delete(String host, Identifiable container) {
-		Client client = null;
-		try {
-			client = ClientBuilder.newClient();
-			log.debug("Removing container: {}", container.getId());
-			client.target(host + "/containers/" + container.getId() + "?v=1&force=1")
-				.request()
-				.delete();
-		}
-		finally {
-			if (client != null) {
-				client.close();
-			}
-		}
+	private void delete(final Identifiable container) throws DockerException, InterruptedException {
+		log.debug("Removing container: {}", container.getId());
+		client.removeContainer(container.getId(), true);
 	}
 	
 	private void waitFor(int millis) {

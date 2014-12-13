@@ -1,5 +1,7 @@
 package nl.tudelft.ewi.build;
 
+import java.io.File;
+
 import lombok.Data;
 import lombok.experimental.Accessors;
 
@@ -14,5 +16,6 @@ public class SimpleConfig implements Config {
 	private String workingDirectory = "/workshop";
 	private String clientId = "test-client";
 	private String clientSecret = "test-secret";
+	private File certificateDirectory = new File("/cert");
 
 }

@@ -1,5 +1,7 @@
 package nl.tudelft.ewi.build;
 
+import java.io.File;
+
 
 public interface Config {
 
@@ -8,6 +10,8 @@ public interface Config {
 	int getMaximumConcurrentJobs();
 	
 	String getDockerHost();
+	
+	File getCertificateDirectory();
 	
 	String getStagingDirectory();
 	

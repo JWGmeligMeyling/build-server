@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<artifactId>build-server</artifactId>
 	<packaging>jar</packaging>
-	
+
 	<parent>
 		<groupId>nl.tudelft.ewi.build</groupId>
 		<artifactId>build-server-parent</artifactId>
@@ -40,9 +40,23 @@
 			<version>0.0.1-SNAPSHOT</version>
 		</dependency>
 		<dependency>
-			<groupId>org.xeustechnologies</groupId>
-			<artifactId>jtar</artifactId>
-			<version>1.1</version>
+			<groupId>com.spotify</groupId>
+			<artifactId>docker-client</artifactId>
+			<version>2.7.6-SNAPSHOT</version>
+			<exclusions>
+				<exclusion>
+					<groupId>org.glassfish.jersey.core</groupId>
+					<artifactId>jersey-client</artifactId>
+				</exclusion>
+				<exclusion>
+					<groupId>org.glassfish.jersey.connectors</groupId>
+					<artifactId>jersey-apache-connector</artifactId>
+				</exclusion>
+				<exclusion>
+					<groupId>org.glassfish.jersey.media</groupId>
+					<artifactId>jersey-media-json-jackson</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 	</dependencies>
 

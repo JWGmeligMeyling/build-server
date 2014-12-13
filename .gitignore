@@ -62,3 +62,5 @@ build-models/.settings
 
 build-server/target/
 build-server/.settings
+.DS_Store
+staging/

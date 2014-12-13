@@ -10,6 +10,8 @@ import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.StreamingOutput;
 
+import com.spotify.docker.client.DockerException;
+
 import java.io.IOException;
 import java.io.OutputStream;
 
@@ -31,6 +33,53 @@ public class ImagesResource {
 	public ImagesResource(DockerManager manager) {
 		this.manager = manager;
 	}
+	
+	static class OutputStreamImageBuildObserver implements ImageBuildObserver {
+		
+		private final OutputStream output;
+		
+		public OutputStreamImageBuildObserver(final OutputStream output) {
+			this.output = output;
+		}
+		
+		@Override
+		public void onMessage(String message) {
+			try {
+				if (!message.endsWith("\n")) {
+					message += "\n";
+				}
+				output.write(message.getBytes());
+				output.flush();
+			} 
+			catch (IOException e) {
+				log.error(e.getMessage(), e);
+			}
+		}
+		
+		@Override
+		public void onError(String message) {
+			try {
+				if (message.endsWith("\n")) {
+					message = message.substring(0, message.length() - 1);
+				}
+				output.write(message.getBytes());
+				output.flush();
+			} 
+			catch (IOException e) {
+				log.error(e.getMessage(), e);
+			}
+		}
+		
+		@Override
+		public void onCompleted() {
+			try {
+				output.close();
+			} 
+			catch (IOException e) {
+				log.error(e.getMessage(), e);
+			}
+		}
+	}
 
 	@POST
 	@RequireAuthentication
@@ -38,45 +87,12 @@ public class ImagesResource {
 		return new StreamingOutput() {
 			@Override
 			public void write(final OutputStream output) throws IOException, WebApplicationException {
-				manager.buildImage(imageRequest.getName(), imageRequest.getInstructions(), new ImageBuildObserver() {
-					@Override
-					public void onMessage(String message) {
-						try {
-							if (!message.endsWith("\n")) {
-								message += "\n";
-							}
-							output.write(message.getBytes());
-							output.flush();
-						} 
-						catch (IOException e) {
-							log.error(e.getMessage(), e);
-						}
-					}
-					
-					@Override
-					public void onError(String message) {
-						try {
-							if (message.endsWith("\n")) {
-								message = message.substring(0, message.length() - 1);
-							}
-							output.write(message.getBytes());
-							output.flush();
-						} 
-						catch (IOException e) {
-							log.error(e.getMessage(), e);
-						}
-					}
-					
-					@Override
-					public void onCompleted() {
-						try {
-							output.close();
-						} 
-						catch (IOException e) {
-							log.error(e.getMessage(), e);
-						}
-					}
-				});
+				try {
+					manager.buildImage(imageRequest.getName(), imageRequest.getInstructions(), new OutputStreamImageBuildObserver(output));
+				}
+				catch (DockerException | InterruptedException e) {
+					throw new WebApplicationException(e);
+				}
 			}
 		};
 	}

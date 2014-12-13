@@ -1,5 +1,6 @@
 package nl.tudelft.ewi.build;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.Properties;
@@ -24,33 +25,45 @@ public class PropertyBasedConfig implements Config {
 			log.error(e.getMessage());
 		}
 	}
-	
+
+	@Override
 	public int getHttpPort() {
 		return Integer.parseInt(properties.getProperty("http.port", "8080"));
 	}
-	
+
+	@Override
 	public int getMaximumConcurrentJobs() {
 		return Integer.parseInt(properties.getProperty("docker.max-containers"));
 	}
-	
+
+	@Override
 	public String getDockerHost() {
 		return properties.getProperty("docker.host", "http://localhost:4243");
 	}
-	
+
+	@Override
 	public String getStagingDirectory() {
 		return properties.getProperty("docker.staging-directory");
 	}
-	
+
+	@Override
 	public String getWorkingDirectory() {
 		return properties.getProperty("docker.working-directory");
 	}
-	
+
+	@Override
 	public String getClientId() {
 		return properties.getProperty("authorization.client-id");
 	}
-	
+
+	@Override
 	public String getClientSecret() {
 		return properties.getProperty("authorization.client-secret");
+	}
+
+	@Override
+	public File getCertificateDirectory() {
+		return new File(properties.getProperty("docker.cert-directory"));
 	}
 	
 }

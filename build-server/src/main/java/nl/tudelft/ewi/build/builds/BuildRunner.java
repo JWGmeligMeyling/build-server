@@ -13,6 +13,8 @@ import java.util.UUID;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
+import com.spotify.docker.client.DockerException;
+
 import lombok.Data;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +34,7 @@ import nl.tudelft.ewi.build.jaxrs.models.BuildInstruction;
 import nl.tudelft.ewi.build.jaxrs.models.BuildRequest;
 import nl.tudelft.ewi.build.jaxrs.models.BuildResult;
 import nl.tudelft.ewi.build.jaxrs.models.Source;
+
 import org.jboss.resteasy.util.Base64;
 
 @Data
@@ -70,7 +73,13 @@ class BuildRunner implements Runnable {
 		Identifiable identifiable = logger.getContainer();
 		if (identifiable != null) {
 			log.warn("Issueing container termination to docker: {}", identifiable);
-			docker.terminate(identifiable);
+			try {
+				docker.terminate(identifiable);
+			}
+			catch (InterruptedException | DockerException e) {
+				log.warn("Failed to terminate container {}", identifiable);
+				log.warn(e.getMessage(), e);
+			}
 		}
 	}
 
