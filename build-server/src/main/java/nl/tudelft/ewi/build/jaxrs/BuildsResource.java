@@ -16,8 +16,8 @@ import javax.ws.rs.core.Response.Status;
 
 import lombok.extern.slf4j.Slf4j;
 import nl.tudelft.ewi.build.builds.BuildManager;
+import nl.tudelft.ewi.build.jaxrs.adapters.AdaptedBuildRequest;
 import nl.tudelft.ewi.build.jaxrs.filters.RequireAuthentication;
-import nl.tudelft.ewi.build.jaxrs.models.BuildRequest;
 
 @Slf4j
 @Path("api/builds")
@@ -34,25 +34,20 @@ public class BuildsResource {
 
 	@POST
 	@RequireAuthentication
-	public Response onBuildRequest(@Valid BuildRequest buildRequest) {
-		UUID buildId = null;
+	public Response onBuildRequest(@Valid AdaptedBuildRequest buildRequest) {
 		try {
-			buildId = manager.schedule(buildRequest);
+			manager.schedule(buildRequest);
+			return Response.ok("You're cool").build();
 		}
 		catch (Throwable e) {
 			log.error(e.getMessage(), e);
 		}
 
-		if (buildId == null) {
-			return Response.status(Status.CONFLICT)
-				.entity("Server cannot accept build request.")
-				.build();
-		}
-
-		return Response.ok(buildId)
+		return Response.status(Status.CONFLICT)
+			.entity("Server cannot accept build request.")
 			.build();
 	}
-
+	
 	@DELETE
 	@RequireAuthentication
 	@Path("{buildId}")

@@ -34,7 +34,7 @@ public class PropertyBasedConfig implements Config {
 	}
 	
 	public String getDockerHost() {
-		return properties.getProperty("docker.host", "http://localhost:4243");
+		return properties.getProperty("docker.host", "https://192.168.59.103:2376");
 	}
 	
 	public String getStagingDirectory() {
@@ -51,6 +51,11 @@ public class PropertyBasedConfig implements Config {
 	
 	public String getClientSecret() {
 		return properties.getProperty("authorization.client-secret");
+	}
+
+	@Override
+	public String getCertificateDir() {
+		return properties.getProperty("docker.cert-directory");
 	}
 	
 }

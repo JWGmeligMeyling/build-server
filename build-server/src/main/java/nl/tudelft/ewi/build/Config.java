@@ -9,6 +9,8 @@ public interface Config {
 	
 	String getDockerHost();
 	
+	String getCertificateDir();
+	
 	String getStagingDirectory();
 	
 	String getWorkingDirectory();
