@@ -1,5 +1,7 @@
 package nl.tudelft.ewi.build.builds;
 
+import static com.google.common.base.Charsets.UTF_8;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -130,7 +132,7 @@ public class BuildManager {
 							Status.SUCCEEDED : Status.FAILED;
 				}
 				catch (TimeoutException e) {
-					log.info("Build timed out", e);
+					log.info("Build timed out {}", buildRunner.uuid);
 					printWriter.write("[FATAL] Build timed out!");
 					status = Status.FAILED;
 				}
@@ -183,6 +185,7 @@ public class BuildManager {
 			ContainerConfig config = ContainerConfig.builder()
 					.image(instruction.getImage())
 					.volumes(volume)
+					.tty(false)
 					.workingDir(workDir)
 					.cmd(instruction.getCommand())
 					.build();
@@ -205,7 +208,11 @@ public class BuildManager {
 			try(LogStream stream = dockerClient.attachContainer(id, AttachParameter.LOGS,
 					AttachParameter.STDERR, AttachParameter.STDOUT, AttachParameter.STREAM)) {
 				log.info("Attaching log for container {}", id);
-				writer.println(stream.readFully());
+				while(stream.hasNext()) {
+					String content = UTF_8.decode(stream.next().content()).toString();
+					System.out.print(content);
+					writer.print(content);
+				}
 			}
 			
 			log.info("Waiting for container to terminate {}", id);

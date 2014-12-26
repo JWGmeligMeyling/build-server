@@ -53,6 +53,7 @@ public class AdaptedGitDirectoryPreparer extends AdaptedDirectoryPreparer {
 		try {
 			String ref = branchName;
 			if(ref == null) ref = "HEAD";
+			else ref = "origin/" + ref;
 			
 			log.info("Checking out revision: {}", commitId);
             CheckoutCommand checkout = git.checkout();

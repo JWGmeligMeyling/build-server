@@ -18,5 +18,9 @@ public interface Config {
 	String getClientId();
 	
 	String getClientSecret();
+
+	String getGitOAuthToken();
+
+	String getPasteBinToken();
 	
 }

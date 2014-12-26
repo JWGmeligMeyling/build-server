@@ -57,5 +57,15 @@ public class PropertyBasedConfig implements Config {
 	public String getCertificateDir() {
 		return properties.getProperty("docker.cert-directory");
 	}
-	
+
+	@Override
+	public String getGitOAuthToken() {
+		return System.getenv("github.client.oauth-token");
+	}
+
+	@Override
+	public String getPasteBinToken() {
+		return System.getenv("pastebin.oauth-token");
+	}
+
 }

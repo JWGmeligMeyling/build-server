@@ -23,7 +23,7 @@ import com.spotify.docker.client.DockerCertificateException;
 import com.spotify.docker.client.DockerClient;
 
 @Slf4j
-public class BuildManagerV2Test {
+public class BuildManagerTest {
 	
 	private static ExecutorService executor;
 	private static DockerClient dockerClient;

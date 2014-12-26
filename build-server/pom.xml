@@ -29,7 +29,16 @@
 		</dependency>
 
 		<!-- Utilities -->
-	
+		<dependency>
+			<groupId>org.kohsuke</groupId>
+			<artifactId>github-api</artifactId>
+			<version>1.59</version>
+		</dependency>
+		<dependency>
+			<groupId>nl.tudelft.ewi.build</groupId>
+			<artifactId>github-webhook</artifactId>
+			<version>0.0.1-SNAPSHOT</version>
+		</dependency>
 		<dependency>
 		  <groupId>com.spotify</groupId>
 		  <artifactId>docker-client</artifactId>
